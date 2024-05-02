@@ -31,7 +31,10 @@ class PairwiseTrainer(Trainer):
         self.can_return_loss = True  # override property to return eval_loss
         if finetuning_args.use_badam:
             from badam import clip_grad_norm_for_sparse_tensor
-
+            self.accelerator.clip_grad_norm_ = MethodType(clip_grad_norm_for_sparse_tensor, self.accelerator)
+        
+        if finetuning_args.use_lisa:
+            from ...extras.lisa_optimizer import clip_grad_norm_for_sparse_tensor
             self.accelerator.clip_grad_norm_ = MethodType(clip_grad_norm_for_sparse_tensor, self.accelerator)
 
     def create_optimizer(self) -> "torch.optim.Optimizer":

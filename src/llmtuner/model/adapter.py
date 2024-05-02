@@ -43,7 +43,7 @@ def init_adapter(
 
     if finetuning_args.finetuning_type == "full" and is_trainable:
         logger.info("Fine-tuning method: Full")
-        if (not finetuning_args.pure_bf16) and (not finetuning_args.use_badam):
+        if (not finetuning_args.pure_bf16) and (not finetuning_args.use_badam) and (not finetuning_args.use_lisa):
             model = model.float()
 
     if finetuning_args.finetuning_type == "freeze" and is_trainable:
@@ -90,7 +90,7 @@ def init_adapter(
 
         for name, param in model.named_parameters():
             if any(trainable_layer in name for trainable_layer in trainable_layers):
-                if (not finetuning_args.pure_bf16) and (not finetuning_args.use_badam):
+                if (not finetuning_args.pure_bf16) and (not finetuning_args.use_badam) and (not finetuning_args.use_lisa):
                     param.data = param.data.to(torch.float32)
             else:
                 param.requires_grad_(False)
@@ -188,7 +188,7 @@ def init_adapter(
                 )
                 model = get_peft_model(model, lora_config)
 
-        if (not finetuning_args.pure_bf16) and (not finetuning_args.use_badam):
+        if (not finetuning_args.pure_bf16) and (not finetuning_args.use_badam) and (not finetuning_args.use_lisa):
             for param in filter(lambda p: p.requires_grad, model.parameters()):
                 param.data = param.data.to(torch.float32)
 

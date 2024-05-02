@@ -204,6 +204,26 @@ class GaloreArguments:
 
 
 @dataclass
+class LisaArgument:
+    r"""
+    Arguments pertaining to the Lisa method.
+    """
+
+    use_lisa: bool = field(
+        default=False,
+        metadata={"help": "Whether or not to use the Lisa method."},
+    )
+    lisa_activated_layers: Optional[int] = field(
+        default=1,
+        metadata={"help": "The number of activated layers when training."},
+    )
+    lisa_interval_steps: Optional[int] = field(
+        default=5,
+        metadata={"help": "The interval of changing the layer."},
+    )
+
+
+@dataclass
 class BAdamArgument:
     r"""
     Arguments pertaining to the BAdam optimizer.
@@ -251,7 +271,7 @@ class BAdamArgument:
 
 
 @dataclass
-class FinetuningArguments(FreezeArguments, LoraArguments, RLHFArguments, GaloreArguments, BAdamArgument):
+class FinetuningArguments(FreezeArguments, LoraArguments, RLHFArguments, GaloreArguments, BAdamArgument, LisaArgument):
     r"""
     Arguments pertaining to which techniques we are going to fine-tuning with.
     """
