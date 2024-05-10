@@ -376,7 +376,9 @@ def _create_lisa_optimizer(
         base_optimizer=base_optimizer,
         named_parameters_list=list(model.named_parameters()),
         lisa_activated_layers=finetuning_args.lisa_activated_layers,
-        lisa_interval_steps=finetuning_args.lisa_interval_steps
+        lisa_interval_steps=finetuning_args.lisa_interval_steps,
+        lisa_order=finetuning_args.lisa_order,
+        include_embedding_and_lm_head=finetuning_args.including_embed_and_lm_head
     )
     # logger.info(
     #     f"Using BAdam optimizer with layer-wise update, switch mode is {finetuning_args.badam_switch_mode}, "

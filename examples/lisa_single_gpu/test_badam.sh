@@ -1,6 +1,6 @@
 #!/bin/bash
 export WANDB_PROJECT=llama-factory
-CUDA_VISIBLE_DEVICES=3 python ../../src/train_bash.py \
+CUDA_VISIBLE_DEVICES=2 python ../../src/train_bash.py \
     --stage sft \
     --do_train \
     --model_name_or_path meta-llama/Llama-2-7b-hf \
@@ -9,10 +9,10 @@ CUDA_VISIBLE_DEVICES=3 python ../../src/train_bash.py \
     --template default \
     --finetuning_type full \
     --use_badam \
-    --badam_switch_mode ascending \
-    --badam_switch_block_every 1 \
+    --badam_switch_mode random \
+    --badam_switch_block_every 50 \
     --badam_verbose 2 \
-    --output_dir ../../saves/LLaMA2-7B/badam/sft \
+    --output_dir ../../saves/LLaMA2-7B/badam/badam-llama-2-7b-rand-switch50-batch8-acc15-epoch7-1e-5 \
     --overwrite_cache \
     --overwrite_output_dir \
     --cutoff_len 1024 \
@@ -25,7 +25,7 @@ CUDA_VISIBLE_DEVICES=3 python ../../src/train_bash.py \
     --save_steps 10000000000 \
     --learning_rate 1e-5 \
     --report_to wandb \
-    --run_name badam-llama-2-7b-switch10-asc-batch8-acc15-epoch7-1e-5 \
+    --run_name badam-llama-2-7b-rand-switch50-batch16-acc15-epoch7-1e-5 \
     --num_train_epochs 7 \
     --plot_loss \
     --bf16

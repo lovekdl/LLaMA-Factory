@@ -221,6 +221,15 @@ class LisaArgument:
         default=5,
         metadata={"help": "The interval of changing the layer."},
     )
+    including_embed_and_lm_head: Optional[bool] = field(
+        default=True,
+        metadata={"help": "Whether training embedding and lm_head all the time."},
+    )
+    lisa_order :  Optional[Literal["ascending", "descending", "random"]] = field(
+        default="random",
+        metadata={"help": "Change layers by ascending, descending or random order."},
+    )
+    
 
 
 @dataclass

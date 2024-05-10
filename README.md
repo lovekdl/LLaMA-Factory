@@ -1,3 +1,33 @@
+# lovekdl-Llama-factory
+
+This repository is an implementation of [Lisa: Layerwise Importance Sampling for Memory-Efficient Large Language Model Fine-Tuning](https://arxiv.org/abs/2403.17919) in llama-facotry.
+
+The script is at examples/lisa_single_gpu/sft.sh
+
+The Lisa arguments are as follows:
+```python
+use_lisa: bool = field(
+    default=False,
+    metadata={"help": "Whether or not to use the Lisa method."},
+)
+lisa_activated_layers: Optional[int] = field(
+    default=1,
+    metadata={"help": "The number of activated layers when training."},
+)
+lisa_interval_steps: Optional[int] = field(
+    default=5,
+    metadata={"help": "The interval of changing the layer."},
+)
+including_embed_and_lm_head: Optional[bool] = field(
+    default=True,
+    metadata={"help": "Whether training embedding and lm_head all the time."},
+)
+lisa_order :  Optional[Literal["ascending", "descending", "random"]] = field(
+    default="random",
+    metadata={"help": "Change layers by ascending, descending or random order."},
+)
+```
+
 ![# LLaMA Factory](assets/logo.png)
 
 [![GitHub Repo stars](https://img.shields.io/github/stars/hiyouga/LLaMA-Factory?style=social)](https://github.com/hiyouga/LLaMA-Factory/stargazers)

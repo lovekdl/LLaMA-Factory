@@ -9,11 +9,9 @@ import math
 import warnings
 from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 import numpy as np
-# Optional [0, 1, 2]. 
-    # 0: no print
-    # 1: print the relative time whenever a parameter's grad is ready
-    # 2: for debug usage only. Will set all the parameters trainable, print the grad ready time for each parameter. 
-    #     In this case, all the grad except the "specified" trainable parameters will be set to None after being calculated.
+
+
+
 BACKWARD_VERBOSE = 0
 
 class LisaOptimizer(Optimizer):
@@ -26,8 +24,8 @@ class LisaOptimizer(Optimizer):
         lisa_activated_layers = 1,
         lisa_interval_steps = 5,
         active_modules: List[str] = [],
-        include_embedding=True,
-        include_lm_head=True,
+        include_embedding_and_lm_head=True,
+        lisa_order="ascending",
         verbose: int = 1,
         log_fn = None,
     ):
@@ -38,20 +36,17 @@ class LisaOptimizer(Optimizer):
             block_prefix_list (List[List[str]]): The list of blocks of parameters to be updated.
             lisa_interval_steps (int, optional): The number of optimization steps before switching to the next block. Defaults to 10.
             start_block (Optional[int], optional): The index of the block to start with. Defaults to None.
-            switch_mode (str, optional): The mode for switching between different blocks of parameters. Defaults to "descending".
             active_modules (List[str]): The list of modules that are always active during optimization. Defaults to None.
             verbose (int, optional): The verbosity level for printing information during optimization. Defaults to 1.
             log_fn: A logging function for recording information during optimization. Defaults to None.
         """
         # print(base_optimizer)
-        block_prefix_list, other_params = self.infer_param_groups([n for n, _ in named_parameters_list], include_embedding, include_lm_head)
+        block_prefix_list, other_params = self.infer_param_groups([n for n, _ in named_parameters_list])
 
-        switch_mode = "random"
         assert isinstance(block_prefix_list, list)
         self.lisa_activated_layers = lisa_activated_layers
         self.lisa_interval_steps = lisa_interval_steps
         self.verbose = verbose
-        self.switch_mode = switch_mode
         self.named_parameters_list = named_parameters_list
         self.weight_decay = base_optimizer.param_groups[0]["weight_decay"]
         self.block_prefix_list = block_prefix_list
@@ -62,6 +57,12 @@ class LisaOptimizer(Optimizer):
         self.base_optimizer = base_optimizer
         self.active_modules = active_modules
         self.defaults = base_optimizer.defaults
+        self.active_layers_indices = []
+        self.include_embedding_and_lm_head = include_embedding_and_lm_head
+
+        self.lisa_order = lisa_order
+        if lisa_order not in ["ascending", "descending", "random"]:
+            self.lisa_order = "ascending"
 
         self.param_groups = base_optimizer.param_groups
         self.state_dict = base_optimizer.state_dict # for compatibility of hf Trainer
@@ -71,7 +72,7 @@ class LisaOptimizer(Optimizer):
         self.lora_mode = False
             
         if any(isinstance(p, torch.FloatTensor) for _, p in named_parameters_list):
-            warnings.warn("BAdam expect model to be loaded in fp16 precision while detect fp32 weight. \
+            warnings.warn("Expect model to be loaded in fp16 precision while detect fp32 weight. \
                 This will cause additional memory usage and lose the benefit of mixed precision training.")
             
         super().__init__(self.param_groups, base_optimizer.defaults)
@@ -101,7 +102,7 @@ class LisaOptimizer(Optimizer):
             if "lm_head" in n:
                 return p
 
-    def infer_param_groups(self, param_names, include_embedding, include_lm_head):
+    def infer_param_groups(self, param_names):
         """automatic inference of the parameter groups based on the parameter names.
         divide groups into:
             * embedding
@@ -134,6 +135,7 @@ class LisaOptimizer(Optimizer):
         # for i in range(10) :
         #     print(block_prefix_list)
         print(block_prefix_list)
+        self.total_layers = len(block_prefix_list)
         print(other_params)
         return block_prefix_list, other_params
                 
@@ -225,16 +227,37 @@ class LisaOptimizer(Optimizer):
         """
         if verbose is None:
             verbose = self.verbose
+        if self.lisa_order == "random" :
+            self.active_layers_indices = np.random.choice(range(self.block_num), self.lisa_activated_layers, replace=False)
+        elif self.lisa_order == "ascending" :
+            if len(self.active_layers_indices):
+                st = self.active_layers_indices[-1] + 1
+                self.active_layers_indices = []
+                for i in range(st, st + self.lisa_activated_layers) :
+                    self.active_layers_indices.append(i % self.total_layers)
+            else :
+                self.active_layers_indices = [i for i in range(self.lisa_activated_layers)]
+        elif self.lisa_order == "descending" :
+            if len(self.active_layers_indices):
+                st = self.active_layers_indices[-1] - 1
+                self.active_layers_indices = []
+                for i in range(st, st - self.lisa_activated_layers, -1) :
+                    self.active_layers_indices.append((i + self.total_layers) % self.total_layers)
+            else :
+                self.active_layers_indices = [i for i in range(self.lisa_activated_layers)]
+                # print(self.active_layers_indices)
+                self.active_layers_indices.reverse()
+            # print(self.active_layers_indices)
+                       
 
-        
-        
-        active_layers_indices = np.random.choice(range(self.block_num), self.lisa_activated_layers, replace=False)
-        print(f"Activating layers at indices: {active_layers_indices} for the next steps.", flush=True)
+
+        # 
+        print(f"Activating layers at indices: {self.active_layers_indices} for the next steps.", flush=True)
         
         # self.active_param_prefixs = self.block_prefix_list[active_layers_indices]
         self.active_param_prefixs = []
         
-        for i in active_layers_indices :
+        for i in self.active_layers_indices :
             self.active_param_prefixs.append(self.block_prefix_list[i][0])
         # for i in range(10) :
         #     print(self.active_param_prefixs)
@@ -259,7 +282,13 @@ class LisaOptimizer(Optimizer):
             },
         ]
         for i, (name, param) in enumerate(self.named_parameters_list):
-            if not any (p in name for p in self.other_params) and not any(p in name for p in self.active_param_prefixs):
+            freezing_this_layer = False
+            if not self.include_embedding_and_lm_head and not any(p in name for p in self.active_param_prefixs) :
+                freezing_this_layer = True
+            if self.include_embedding_and_lm_head and not any (p in name for p in self.other_params) and not any(p in name for p in self.active_param_prefixs) :
+                freezing_this_layer = True
+            
+            if freezing_this_layer:
                 param.requires_grad_(False)
                 param.grad = None
                 # print("NOT activated name: ", name)

@@ -12,6 +12,7 @@ from .logging import get_logger
 from .misc import fix_valuehead_checkpoint
 
 
+
 if TYPE_CHECKING:
     from transformers import TrainerControl, TrainerState, TrainingArguments
 
@@ -31,6 +32,40 @@ class FixValueHeadModelCallback(TrainerCallback):
                 safe_serialization=args.save_safetensors,
             )
 
+
+class MemoryMonitorCallback(TrainerCallback):
+    def __init__(self, model) :
+        self.model = model
+    # def on_step_begin(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs) :
+    #     import torch
+    #     print(f"Step begin Memory allocated: {torch.cuda.memory_allocated()/1024/1024/1024} GB")
+    def on_step_begin (self, args, state, control, **kwargs) :
+        trainable_params, all_param = 0, 0
+        for param in self.model.parameters():
+            num_params = param.numel()
+            # if using DS Zero 3 and the weights are initialized empty
+            if num_params == 0 and hasattr(param, "ds_numel"):
+                num_params = param.ds_numel
+
+            # Due to the design of 4bit linear layers from bitsandbytes, multiply the number of parameters by 2
+            if param.__class__.__name__ == "Params4bit":
+                if hasattr(param, "quant_storage") and hasattr(param.quant_storage, "itemsize"):
+                    num_bytes = param.quant_storage.itemsize
+                elif hasattr(param, "element_size"):  # for older pytorch version
+                    num_bytes = param.element_size()
+                else:
+                    num_bytes = 1
+
+                num_params = num_params * 2 * num_bytes
+
+            all_param += num_params
+            if param.requires_grad:
+                trainable_params += num_params
+        print(f"Trainable parameters: {trainable_params} / {all_param}")
+    def on_step_end(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs) :
+        import torch
+        print(f"Max Memory allocated: {torch.cuda.max_memory_allocated()/1024/1024/1024} GB")
+        
 
 class LogCallback(TrainerCallback):
     def __init__(self, runner=None):

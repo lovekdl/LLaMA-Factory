@@ -13,6 +13,23 @@ from ..utils import create_modelcard_and_push
 from .metric import ComputeMetrics
 from .trainer import CustomSeq2SeqTrainer
 
+from ...extras.callbacks import MemoryMonitorCallback
+
+import threading
+import torch
+import time
+
+def limit_memory() :
+    limits = 30
+    total_memory = torch.cuda.get_device_properties(0).total_memory
+    total_mem = total_memory / 1024 / 1024 / 1024
+    ratio = limits / total_mem
+    torch.cuda.set_per_process_memory_fraction(ratio, 0)
+
+def monitor_memory():
+    while True:
+        print(f"Memory Allocated: {torch.cuda.memory_allocated()/1024/1024/1024} GB")
+        time.sleep(0.5)
 
 if TYPE_CHECKING:
     from transformers import Seq2SeqTrainingArguments, TrainerCallback
@@ -49,7 +66,8 @@ def run_sft(
     training_args.generation_max_length = training_args.generation_max_length or data_args.cutoff_len
     training_args.generation_num_beams = data_args.eval_num_beams or training_args.generation_num_beams
     training_args.remove_unused_columns = False if model_args.visual_inputs else training_args.remove_unused_columns
-
+    
+    callbacks.append(MemoryMonitorCallback(model=model))
     # Initialize our Trainer
     trainer = CustomSeq2SeqTrainer(
         model=model,
@@ -67,6 +85,14 @@ def run_sft(
     gen_kwargs["eos_token_id"] = [tokenizer.eos_token_id] + tokenizer.additional_special_tokens_ids
     gen_kwargs["pad_token_id"] = tokenizer.pad_token_id
     gen_kwargs["logits_processor"] = get_logits_processor()
+
+    for i in range(30) :
+        print("start")
+    # limit_memory()
+    # memory_thread = threading.Thread(target=monitor_memory)
+    # memory_thread.daemon = True 
+    # memory_thread.start()
+    
 
     # Training
     if training_args.do_train:
