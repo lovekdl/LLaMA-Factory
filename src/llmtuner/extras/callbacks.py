@@ -5,7 +5,9 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from transformers import TrainerCallback
+from transformers.trainer_callback import TrainerControl, TrainerState
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR, has_length
+from transformers.training_args import TrainingArguments
 
 from .constants import LOG_FILE_NAME
 from .logging import get_logger
@@ -64,7 +66,15 @@ class MemoryMonitorCallback(TrainerCallback):
         print(f"Trainable parameters: {trainable_params} / {all_param}")
     def on_step_end(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs) :
         import torch
-        print(f"Max Memory allocated: {torch.cuda.max_memory_allocated()/1024/1024/1024} GB")
+        # print(f"Max Memory allocated: {torch.cuda.max_memory_allocated()/1024/1024/1024} GB")
+        logger.info(f"Max Memory allocated: {torch.cuda.max_memory_allocated()/1024/1024/1024} GB")
+        
+    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        import torch
+        logs = dict(max_memory_allocated=f"{torch.cuda.max_memory_allocated()/1024/1024/1024} GB")
+        os.makedirs(args.output_dir, exist_ok=True)
+        with open(os.path.join(args.output_dir, "memory_cost.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps(logs) + "\n")
         
 
 class LogCallback(TrainerCallback):

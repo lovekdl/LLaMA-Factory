@@ -2,7 +2,7 @@
 
 This repository is an implementation of [Lisa: Layerwise Importance Sampling for Memory-Efficient Large Language Model Fine-Tuning](https://arxiv.org/abs/2403.17919) in llama-facotry.
 
-The script is at examples/lisa_single_gpu/sft.sh
+**The script is at examples/lisa_single_gpu/sft.sh**
 
 The Lisa arguments are as follows:
 ```python

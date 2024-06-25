@@ -61,8 +61,23 @@ class LisaOptimizer(Optimizer):
         self.include_embedding_and_lm_head = include_embedding_and_lm_head
 
         self.lisa_order = lisa_order
-        if lisa_order not in ["ascending", "descending", "random"]:
-            self.lisa_order = "ascending"
+
+        self.current_grad_norms = [[] for _ in range(self.total_layers)]
+        self.grad_norms = [0] * self.total_layers
+        self.last_grad_norms = [100000.0] * self.total_layers
+        self.avg_grad_norms = [0] * self.total_layers
+        self.grad_norms_calculated_times = [0] * self.total_layers
+        self.embed_grad_norm = 0
+        self.avg_embed_grad_norm = 0
+        self.embed_grad_norm_calculated_times = 0
+        self.lm_head_grad_norm = 0
+        self.lm_head_grad_norm_calculated_times = 0
+        self.avg_lm_head_grad_norm = 0
+
+        self.layers_param_number = [0] * self.total_layers
+        self.embed_param_number = 0
+        self.lm_head_param_number = 0
+        self.calculate_param_numbers(named_parameters_list)
 
         self.param_groups = base_optimizer.param_groups
         self.state_dict = base_optimizer.state_dict # for compatibility of hf Trainer
@@ -138,7 +153,27 @@ class LisaOptimizer(Optimizer):
         self.total_layers = len(block_prefix_list)
         print(other_params)
         return block_prefix_list, other_params
-                
+    
+    def calculate_param_numbers(self, named_param_list) :
+        embed_pattern = r'.*embed[^.]*\.'
+        layer_pattern = r'.*layers.[^.]*\.'
+        import re
+
+        self.current_grad_norms = [[] for _ in range(self.total_layers)]
+        for name, param in self.named_parameters_list:
+            is_layer_param = False
+            for i in range(self.total_layers) :
+                if(self.block_prefix_list[i][0] in name) :
+                    self.layers_param_number[i] += param.numel()
+                    is_layer_param = True
+                    break
+            if not is_layer_param :
+                if re.findall(embed_pattern, name):
+                    self.embed_param_number += param.numel()
+                elif "lm_head" in name:
+                    self.lm_head_param_number += param.numel()
+        
+
     def test_hook(self, name):
         """hook used for recording the time of gradient calculation, see comments on BACKWARD_VERBOSE for more details."""
         
@@ -181,7 +216,9 @@ class LisaOptimizer(Optimizer):
 
     def step(self, *args, **kwargs) -> None:
         self.record_mark = True
-
+        # print("start")
+        self.calculate_grad_norm_for_each_layer()
+        # print("finish")
         self._update_lr()
         self._grad_to_hp()
         self.base_optimizer.step(*args, **kwargs)
@@ -218,6 +255,49 @@ class LisaOptimizer(Optimizer):
             if clear_lp_grads:
                 lp_param.grad = None
 
+    def calculate_grad_norm_for_each_layer(self) :
+        embed_pattern = r'.*embed[^.]*\.'
+        layer_pattern = r'.*layers.[^.]*\.'
+        import re
+
+        self.current_grad_norms = [[] for _ in range(self.total_layers)]
+        for name, param in self.named_parameters_list:
+            if param.grad is None : 
+                continue
+            current_grad_norm = torch.norm(param.grad).to(torch.float32).item()
+            is_layer_param = False
+            for i in range(self.total_layers) :
+                if(self.block_prefix_list[i][0] in name) :
+                    self.current_grad_norms[i].append(current_grad_norm)
+                    is_layer_param = True
+                    break
+            if not is_layer_param :
+                if re.findall(embed_pattern, name):
+                    self.embed_grad_norm_calculated_times += 1
+                    self.embed_grad_norm += current_grad_norm
+                    self.avg_embed_grad_norm = self.embed_grad_norm / self.embed_grad_norm_calculated_times
+                    # print(f"embed : current_grad_norm={current_grad_norm} avg_grad_norms={self.avg_embed_grad_norm} param_number={self.embed_param_number}")
+                elif "lm_head" in name:
+                    self.lm_head_grad_norm_calculated_times += 1
+                    self.lm_head_grad_norm += current_grad_norm
+                    # print(f"lm_head_grad_norm={self.lm_head_grad_norm} lm_head_grad_norm_calculated_times = {self.lm_head_grad_norm_calculated_times}")
+                    self.avg_lm_head_grad_norm = self.lm_head_grad_norm / self.lm_head_grad_norm_calculated_times
+                    # print(f"lm_head : current_grad_norm={current_grad_norm} avg_grad_norms={self.avg_lm_head_grad_norm} param_number={self.lm_head_param_number}")
+        
+        for i in range(self.total_layers) :
+            if len(self.current_grad_norms[i]) == 0 :
+                continue
+            self.grad_norms_calculated_times[i] += 1
+            current_grad_norm = torch.norm(torch.tensor(self.current_grad_norms[i])).to(torch.float32).item()
+            self.grad_norms[i] += current_grad_norm
+            self.avg_grad_norms[i] = self.grad_norms[i] / self.grad_norms_calculated_times[i]
+            self.last_grad_norms[i] += current_grad_norm
+            # print(f"layer {i} : current_grad_norm={current_grad_norm} avg_grad_norms={self.avg_grad_norms[i]} param_number={self.layers_param_number[i]}")
+
+            # print(f"torch norm calculate -- {name}: {torch.norm(param.grad)}")
+        # print(self.avg_grad_norms)
+
+
     def update_trainable_params(self, verbose: Optional[int] = None) -> None:
         """
         Update the trainable parameters based on the current block index and the specified verbosity level.
@@ -247,9 +327,16 @@ class LisaOptimizer(Optimizer):
                 self.active_layers_indices = [i for i in range(self.lisa_activated_layers)]
                 # print(self.active_layers_indices)
                 self.active_layers_indices.reverse()
+        elif self.lisa_order == "min_grad" :
+            
+            self.active_layers_indices = sorted(range(len(self.last_grad_norms)), key=lambda i: self.last_grad_norms[i], reverse=True)[:self.lisa_activated_layers]
+            for i in self. active_layers_indices :
+                self.last_grad_norms[i] = 0
+            
+            # self.active_layers_indices = [10]
+            
+            print(f"Min grad method choose layers: f{self.active_layers_indices}")
             # print(self.active_layers_indices)
-                       
-
 
         # 
         print(f"Activating layers at indices: {self.active_layers_indices} for the next steps.", flush=True)
@@ -288,6 +375,10 @@ class LisaOptimizer(Optimizer):
             if self.include_embedding_and_lm_head and not any (p in name for p in self.other_params) and not any(p in name for p in self.active_param_prefixs) :
                 freezing_this_layer = True
             
+            # if "lm_head" not in name :
+            #     freezing_this_layer=True
+            # else: freezing_this_layer = False
+
             if freezing_this_layer:
                 param.requires_grad_(False)
                 param.grad = None
